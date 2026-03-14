@@ -1,7 +1,7 @@
 ---
-title: "CTA-ED Exercise 5: Unsupervised learning (topic models)"
-author: "[Names of all group members here]"
-date: "13/03/2024"
+title: "CTA-ED Exercise 5: Unsupervised learning (topic models)- Group 3"
+author: "Yinuo Liu ..........."
+date: "14/03/2024"
 output: html_document
 ---
 ## Introduction
@@ -345,3 +345,248 @@ preText_score_plot(preText_results)
 1. Choose another book or set of books from Project Gutenberg
 2. Run your own topic model on these books, changing the k of topics, and evaluating accuracy.
 3. Validate different pre-processing techniques using `preText` on the new book(s) of your choice. 
+
+# 1
+
+I think we can chose Frankenstein and Pride and Prejudice because they are very different in terms of themes. 
+Frankenstein is more about science, creation, and nature.
+Pride and Prejudice focuses on social life, relationships, and marriage. 
+Because the topics are quite different, it makes it easier to see whether the topic model can detect those differences in the texts. 
+Both books are available on Project Gutenberg and have many chapters, so they are suitable for running a topic model.
+
+```{r}
+gutenberg_metadata %>%
+  filter(author == "Austen, Jane", title == "Pride and Prejudice")
+```
+
+```{r}
+gutenberg_metadata %>%
+  filter(author == "Shelley, Mary Wollstonecraft") %>%
+  filter(str_detect(title, "Frankenstein"))
+```
+Pride and Prejudice --> gutenberg_id = 1342
+Frankenstein --> gutenberg_id = 84
+
+# Exercise 2
+
+1 Load packages
+```{r, message=F}
+#install.packages("gutenbergr")
+library(tidyverse)
+library(stringr)
+library(tidytext)
+library(topicmodels)
+library(gutenbergr)
+library(scales)
+library(tm)
+library(ggthemes)
+library(readr)
+library(quanteda)
+library(quanteda.textmodels)
+library(preText)
+```
+
+2 Download the books from Project Gutenberg
+```{r}
+books <- gutenberg_download(c(84, 1342), meta_fields = "author")
+```
+
+3 Create book label
+```{r}
+books <- books %>%
+  mutate(book = ifelse(gutenberg_id == 84,
+                       "Frankenstein",
+                       "Pride"))
+```
+
+4 Split books into chapters
+each chapter = each document
+```{r}
+books_chapter <- books %>%
+  filter(!is.na(text)) %>%
+  group_by(book) %>%
+  mutate(chapter = cumsum(str_detect(text,
+                                     regex("^chapter", ignore_case = TRUE)))) %>%
+  ungroup() %>%
+  filter(chapter > 0) %>%
+  unite(document, book, chapter)
+
+# Check
+books_chapter %>%
+  count(document)
+```
+
+5 Create Document Term Matrix (DTM)
+```{r}
+# Tokenize words
+books_words <- books_chapter %>%
+  unnest_tokens(word, text)
+
+# Remove stop words and count
+books_word_counts <- books_words %>%
+  anti_join(stop_words) %>%
+  count(document, word, sort = TRUE) %>%
+  ungroup()
+
+books_dtm <- books_word_counts %>%
+  cast_dtm(document, word, n)
+
+tm::inspect(books_dtm)
+```
+
+6 Run topic models(k=2)
+```{r}
+lda_k2 <- LDA(books_dtm, k = 2, control = list(seed = 1234))
+```
+We can try different k numbers.
+
+7 Extract topic-word probabilities (beta)
+```{r}
+books_topics <- tidy(lda_k2, matrix = "beta")
+
+head(books_topics, n = 10)
+```
+
+8 Plot the top terms in terms of beta for each topic
+```{r}
+# Show top terms per topic
+top_terms <- books_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+# Visualise topics
+top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~topic, scales = "free") +
+  scale_y_reordered() +
+  theme_tufte()
+```
+
+9 Checking whether the two books contain distinguishing words
+```{r}
+# Tokenize the text and remove stopwords
+tidy_books <- books %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words)
+
+# Count most common words
+tidy_books %>%
+  count(word, sort = TRUE)
+
+# Compare relative word frequencies between the two books
+bookfreq <- tidy_books %>%
+  mutate(book = ifelse(gutenberg_id == 84, "Frankenstein", "Pride")) %>%
+  mutate(word = str_extract(word, "[a-z']+")) %>%
+  count(book, word) %>%
+  group_by(book) %>%
+  mutate(proportion = n / sum(n)) %>% 
+  select(-n) %>% 
+  spread(book, proportion)
+
+# Visualising differences in word frequencies
+ggplot(bookfreq, aes(x = Frankenstein, y = Pride,
+                     color = abs(Frankenstein - Pride))) +
+  geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.3, height = 0.3) +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  scale_color_gradient(limits = c(0, 0.001),
+                       low = "darkslategray4",
+                       high = "gray75") +
+  theme_tufte(base_family = "Helvetica") +
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        strip.text.x = element_blank()) +
+  labs(x = "Frankenstein",
+       y = "Pride and Prejudice") +
+  coord_equal()
+```
+
+We can see that the two books use quite different vocabularies. 
+Words like lady, sister, and family are more common in Pride and Prejudice, which fits its focus on social life and relationships. Meanwhile, Frankenstein includes words such as death, horror, and soul, reflecting its darker and more philosophical themes. 
+This difference suggests that the texts should be suitable for topic modelling.
+
+10 Extract document-topic probabilities (gamma)
+```{r}
+books_gamma <- tidy(lda_k2, matrix = "gamma")
+books_gamma
+```
+
+11 Examine consensus
+```{r}
+# Split document name
+books_gamma <- books_gamma %>%
+  separate(document, c("book", "chapter"), sep = "_", convert = TRUE)
+
+# Assign chapter to most likely topic
+chapter_classification <- books_gamma %>%
+  group_by(book, chapter) %>%
+  top_n(1, gamma) %>%
+  ungroup()
+
+# Evaluate accuracy
+book_topics <- chapter_classification %>%
+  count(book, topic) %>%
+  group_by(book) %>%
+  top_n(1, n) %>%
+  ungroup() %>%
+  transmute(consensus = book, topic)
+
+# Find misclassified chapters
+chapter_classification %>%
+  inner_join(book_topics, by = "topic") %>%
+  filter(book != consensus)
+
+# Word assignment to topics
+assignments <- augment(lda_k2, data = books_dtm)
+assignments
+
+assignments <- assignments %>%
+  separate(document, c("book", "chapter"), sep = "_", convert = TRUE) %>%
+  inner_join(book_topics, by = c(".topic" = "topic"))
+
+# Visualise topic assignments
+assignments %>%
+  count(book, consensus, wt = count) %>%
+  group_by(book) %>%
+  mutate(percent = n / sum(n)) %>%
+  ggplot(aes(consensus, book, fill = percent)) +
+  geom_tile() +
+  scale_fill_gradient2(high = "red", labels = percent_format()) +
+  geom_text(aes(label = scales::percent(percent))) +
+  theme_tufte(base_family = "Helvetica") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        panel.grid = element_blank()) +
+  labs(x = "Book words assigned to",
+       y = "Book words came from",
+       fill = "% of assignments")
+```
+The heatmap shows that the topic model is able to distinguish the two books very clearly. 
+Almost all words from Frankenstein are assigned to one topic (about 99.95%), and almost all words from Pride and Prejudice are assigned to the other topic (about 99.89%). 
+This suggests that the vocabulary used in the two novels is quite different, allowing the topic model to separate them with very high accuracy.
+
+# Exercise 3
+
+Validation with preText
+
+Sorry, I'm not sure whether my laptop could run the full validation with preText, because the preprocessing step can be quite computationally intensive and may take a long time.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
