@@ -1,6 +1,6 @@
 ---
 title: "CTA-ED Exercise 5: Unsupervised learning (topic models)- Group 3"
-author: "Yinuo Liu ..........."
+author: "Yinuo Liu,Xiangyuanxi Zhang..........."
 date: "14/03/2024"
 output: html_document
 ---
@@ -576,14 +576,60 @@ Validation with preText
 
 Sorry, I'm not sure whether my laptop could run the full validation with preText, because the preprocessing step can be quite computationally intensive and may take a long time.
 
+```{r}
+url <- "https://github.com/cjbarrie/CTA-ED/blob/main/data/wordembed/local_glove.rds?raw=true"
+glove_embedding <- readRDS(url(url, method = "libcurl"))
+
+library(text2vec)
+library(umap)
+library(dplyr)
+library(ggplot2)
+
+url <- "https://github.com/cjbarrie/CTA-ED/blob/main/data/wordembed/local_glove.rds?raw=true"
+glove_embedding <- readRDS(url(url, method = "libcurl"))
+
+#exercise 1
+set.seed(42)
+
+glove_umap <- umap(glove_embedding,
+                   n_components = 2,       
+                   metric = "cosine",      
+                   n_neighbors = 25,
+                   min_dist = 0.1,
+                   spread = 2)
+
+df_glove_umap <- as.data.frame(glove_umap$layout)
+df_glove_umap$word <- rownames(df_glove_umap)
+colnames(df_glove_umap) <- c("UMAP1", "UMAP2", "word")
+
+head(df_glove_umap)
+target <- "climate"
+cos_sim <- sim2(x = glove_embedding, y = glove_embedding[target, , drop = FALSE], method = "cosine")
+nearest <- head(sort(cos_sim[,1], decreasing = TRUE), 15) 
+print(nearest)
 
 
+selected_words <- df_glove_umap %>% filter(word %in% names(nearest))
 
+ggplot(selected_words, aes(x = UMAP1, y = UMAP2)) +
+  geom_point() +
+  geom_text(aes(label = word), vjust = -1, hjust = 0.5, size = 3) +
+  labs(title = paste("Nearest neighbours of", target)) +
+  theme_minimal()
 
+#exercise2
+region_words <- df_glove_umap %>%
+  filter(UMAP1 > -2, UMAP1 < 0, UMAP2 > 4, UMAP2 < 6) %>%
+  pull(word)
+head(region_words, 20)   
 
-
-
-
+region_df <- df_glove_umap %>% filter(word %in% region_words)
+ggplot(region_df, aes(x = UMAP1, y = UMAP2)) +
+  geom_point() +
+  geom_text(aes(label = word), vjust = -1, hjust = 0.5, size = 2.5) +
+  labs(title = "Words in a selected UMAP region") +
+  theme_minimal()
+```
 
 
 
